@@ -1,0 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+import { createHash, randomBytes } from 'node:crypto';
+import { NextRequest, NextResponse } from 'next/server';
+export const runtime='nodejs';
+export const dynamic='force-dynamic';
+function reply(body:unknown,status=200){return NextResponse.json(body,{status,headers:{'Cache-Control':'private, no-store'}});}
+async function client(req:NextRequest){if(process.env.NODE_ENV==='development'&&process.env.LOCAL_SANDBOX==='1'&&['localhost','127.0.0.1'].includes(req.nextUrl.hostname)){const {localClient}=await import('@/lib/local-db');return localClient(req.headers.get('x-local-user')||'');}const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;if(!url||!key)throw Error('服务尚未配置 Supabase');const token=req.headers.get('authorization');if(!token?.startsWith('Bearer '))return null;const db=createClient(url,key,{global:{headers:{Authorization:token}},auth:{persistSession:false,autoRefreshToken:false}});const {data,error}=await db.auth.getUser(token.slice(7));return error||!data.user?null:db;}
+export async function GET(req:NextRequest){try{const db=await client(req);if(!db)return reply({error:'登录已过期，请重新登录'},401);const {data,error}=await db.rpc('ledger_snapshot');if(error)return reply({error:error.message},400);return reply(data);}catch{return reply({error:'无法连接服务，请检查配置或稍后重试'},503);}}
+export async function POST(req:NextRequest){try{const origin=req.headers.get('origin');if(origin&&new URL(origin).host!==req.headers.get('host'))return reply({error:'请求来源无效'},403);const db=await client(req);if(!db)return reply({error:'登录已过期，请重新登录'},401);const raw=await req.text();if(raw.length>32000)return reply({error:'请求过大'},413);let body;try{body=JSON.parse(raw)}catch{return reply({error:'请求格式无效'},400)}if(!body||typeof body!=='object'||Array.isArray(body))return reply({error:'请求格式无效'},400);let token:string|undefined;
+if(body.command==='create_invite'){token=randomBytes(32).toString('base64url');body.token_hash=createHash('sha256').update(token).digest('hex');}
+if(body.command==='join_space'){if(typeof body.token!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(body.token))return reply({error:'邀请链接无效'},400);body.token_hash=createHash('sha256').update(body.token).digest('hex');delete body.token;}
+const {data,error}=await db.rpc('ledger_command',{p:body});if(error)return reply({error:error.message},400);return reply({...((data||{}) as Record<string,unknown>),...(token?{token}:{})});}catch{return reply({error:'连接失败；操作可能已完成，请刷新核对后重试'},503);}}

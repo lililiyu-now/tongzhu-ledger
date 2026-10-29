@@ -1,0 +1,3 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {cents,splitEqual,type Member} from '../lib/domain';
+test('decimal parsing is exact and rejects fractional cents',()=>{assert.equal(cents('0.29'),29);assert.equal(cents('100'),10000);assert.equal(cents('1.1'),110);for(const x of ['-1','1.001','1e2','NaN','Infinity',''])assert.throws(()=>cents(x));});
+test('100 yuan split among three is stable by join order then id',()=>{const m=['c','a','b'].map((id,i)=>({id,joined_at:i===0?'2026-01-02':'2026-01-01'} as Member));assert.deepEqual(splitEqual(10000,m),[{member_id:'a',amount_cents:3334},{member_id:'b',amount_cents:3333},{member_id:'c',amount_cents:3333}]);assert.equal(splitEqual(1,m).reduce((n,s)=>n+s.amount_cents,0),1);});
